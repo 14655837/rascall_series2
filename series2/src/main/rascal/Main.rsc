@@ -108,46 +108,61 @@ public lrel[node,node] removeSymmetricPairs(lrel[node,node] clonePairs) {
 }
 
 list[node] find_clones_type1(list[Declaration] asts, int treshold) {
+    // Step 1: bucket by mass, like in your original version
     map[int, list[node]] bucket = ();
     visit(asts) {
         case node n: {
-        int mass = calc_mass(n);
+            int mass = calc_mass(n);
 
-        // puts the node in a bucket
-        if (mass >= treshold) {
-            if (mass in bucket) {
-                list[node] current_item = bucket[mass];
-                bucket[mass] = current_item + [n];
-            } else {
-                bucket[mass] = [n];
-            }
+            // puts the node in a bucket
+            if (mass >= treshold) {
+                if (mass in bucket) {
+                    list[node] current_item = bucket[mass];
+                    bucket[mass] = current_item + [n];
+                } else {
+                    bucket[mass] = [n];
+                }
             }
         }
     }
 
-    similairity_treshhold =  1.0;
-
-    // TODO rewrite this function!
     list[node] all_clones = [];
-    for (b <- bucket) {
-        if (size(bucket[b]) >= 2) {
-            lrel[node left, node right] bucket_pairs = [];
-            bucket_pairs += bucket[b] * bucket[b];
-            //don't compare with itself
-            bucket_pairs = [pair | pair <- bucket_pairs, pair.left != pair.right];
-            //remove one of the the symmetric pairs, otherwise u count a clone double
-            bucket_pairs = removeSymmetricPairs(bucket_pairs);
+    int doneBuckets = 0;
+    int totalBuckets = size(bucket);
 
-            for (pair <- bucket_pairs) {
-                similairity_pair = similarity(pair[0], pair[1]);
-                if (similairity_pair >= similairity_treshhold) {
-                    all_clones += pair[0];
-                    all_clones += pair[1];
+    // Step 2: for each mass-bucket, group by exact subtree
+    for (b <- bucket) {
+        doneBuckets += 1;
+        if (doneBuckets % 10 == 0) {
+            println("Processed <doneBuckets>/<totalBuckets> buckets...");
+        }
+
+        int bucketSize = size(bucket[b]);
+        if (bucketSize >= 2) {
+
+            // group by exact subtree value inside the mass bucket
+            map[node, list[node]] exactBuckets = ();
+            for (n <- bucket[b]) {
+                if (exactBuckets[n]?) {
+                    exactBuckets[n] += [n];
+                } else {
+                    exactBuckets[n] = [n];
                 }
             }
-        }   
+
+            // Each exactBucket with size >= 2 is a Type I clone class
+            for (k <- exactBuckets) {
+                if (size(exactBuckets[k]) >= 2) {
+                    println("Found Type I clone class with <size(exactBuckets[k])> occurrences.");
+                    // optionally show some structure
+                    println("Representative subtree: <k>");
+                    all_clones += exactBuckets[k];
+                }
+            }
+
+        }
     }
-    
+
     return all_clones;
 }
 
@@ -155,7 +170,7 @@ int main(int testArgument=0) {
     loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;;
     //loc folder_name = |file:///C:/Users/Mikev/Downloads/smallsql0.21_src/smallsql0.21_src|;
     list[Declaration] asts = getASTs(folder_name);
-    list[node] clones_type1 = find_clones_type1(asts, 6);
+    list[node] clones_type1 = find_clones_type1(asts, 25);
     int sum_clones_type1 = size(clones_type1);
 
     println("argument: <sum_clones_type1>");
