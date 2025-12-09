@@ -95,7 +95,19 @@ int calc_mass(node a_node) {
     return counter;
 }
 
-list[nodes] find_clones_type1(list[Declaration] asts, int treshold) {
+// TODO rewrite this function!
+public lrel[tuple[node,loc],tuple[node,loc]] removeSymmetricPairs(lrel[tuple[node,loc],tuple[node,loc]] clonePairs) {
+    lrel[tuple[node,loc],tuple[node,loc]] newClonePairs = [];
+    for (pair <- clonePairs) {
+        tuple[tuple[node,loc],tuple[node,loc]] reversePair = <<pair[1][0],pair[1][1]>,<pair[0][0],pair[0][1]>>;
+        if (reversePair notin newClonePairs) {
+            newClonePairs += pair;
+        }
+    }
+    return newClonePairs;
+}
+
+list[node] find_clones_type1(list[Declaration] asts, int treshold) {
     map[int, list[node]] bucket = ();
     visit(asts) {
         case node n: {
@@ -115,14 +127,19 @@ list[nodes] find_clones_type1(list[Declaration] asts, int treshold) {
 
     similairity_treshhold =  1.0;
 
-    list[nodes] all_clones = [];
+    list[node] all_clones = [];
     for (b <- bucket) {
-        for (item1 <- b) {
-            for (item2 <- b) {
-                real sim = similarity(item1, item2);
-                if (sim > similairity_treshhold) {
-                    all_clones += [item1, item2];
-                }
+        lrel[tuple[node,loc] left, tuple[node,loc] right] bucket_pairs = [];
+		bucket_pairs += bucket[b] * bucket[b];
+        //don't compare with itself
+		bucket_pairs = [pair | pair <- bucket_pairs, pair.left != pair.right];
+        //remove one of the the symmetric pairs, otherwise u count a clone double
+        bucket_pairs = removeSymmetricPairs(bucket_pairs);
+
+        for (pair <- bucket_pairs) {
+            similairity_pair = similarity(bucket_pairs[0][0], bucket_pairs[1][0]);
+            if (similairity_pair >= similairity_treshhold) {
+                all_clones += similairity_pair;
             }
         }
     }
@@ -134,7 +151,7 @@ int main(int testArgument=0) {
     loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;;
     //loc folder_name = |file:///C:/Users/Mikev/Downloads/smallsql0.21_src/smallsql0.21_src|;
     list[Declaration] asts = getASTs(folder_name);
-    int clones_type1 = find_clones_type1(asts, 1);
+    int clones_type1 = find_clones_type1(asts, 6);
 
     println("argument: <clones_type1>");
     return testArgument;
