@@ -9,6 +9,7 @@ import List;
 import Set;
 import String;
 import Map;
+import Node;
 
 // Definitions:
 
@@ -107,6 +108,14 @@ public lrel[node,node] removeSymmetricPairs(lrel[node,node] clonePairs) {
     return newClonePairs;
 }
 
+public node stripLocation(node n) {
+    // Recursively remove the `src` keyword parameter from the key node
+    // (We keep the original node with src separate in `original`)
+    return unsetRec(n, "src");
+}
+
+
+
 list[node] find_clones_type1(list[Declaration] asts, int treshold) {
     // Step 1: bucket by mass, like in your original version
     map[int, list[node]] bucket = ();
@@ -142,7 +151,8 @@ list[node] find_clones_type1(list[Declaration] asts, int treshold) {
 
             // group by exact subtree value inside the mass bucket
             map[node, list[node]] exactBuckets = ();
-            for (n <- bucket[b]) {
+            for (n_old <- bucket[b]) {
+                node n = stripLocation(n_old);
                 if (exactBuckets[n]?) {
                     exactBuckets[n] += [n];
                 } else {
@@ -153,12 +163,11 @@ list[node] find_clones_type1(list[Declaration] asts, int treshold) {
             // Each exactBucket with size >= 2 is a Type I clone class
             for (k <- exactBuckets) {
                 if (size(exactBuckets[k]) >= 2) {
-                    println("Found Type I clone class with <size(exactBuckets[k])> occurrences.");
                     // optionally show some structure
-                    println("Representative subtree: <k>");
                     all_clones += exactBuckets[k];
                 }
             }
+
 
         }
     }
