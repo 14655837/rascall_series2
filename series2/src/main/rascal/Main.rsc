@@ -59,7 +59,7 @@ list[Declaration] getASTs(loc projectLocation) {
 // L = number of different nodes in sub-tree 1
 // R = number of different nodes in sub-tree 2
 
-real similarity(list[Declaration] ast1, list[Declaration] ast2) {
+num similarity(node ast1, node ast2) {
     list[node] nodes_ast1 = [];
     list[node] nodes_ast2 = [];
 
@@ -76,11 +76,11 @@ real similarity(list[Declaration] ast1, list[Declaration] ast2) {
     list[node] only_ast1 = nodes_ast1 - nodes_ast2;
     list[node] only_ast2 = nodes_ast2 - nodes_ast1;
 
-    real S = toReal(size(overlap));
-    real R = toReal(size(only_ast1));
-    real L = toReal(size(only_ast2));
+    num S = size(overlap);
+    num R = size(only_ast1);
+    num L = size(only_ast2);
 
-    real sim = 2.0 * S / (2.0 * S + R + L);
+    num sim = 2.0 * S / (2.0 * S + R + L);
 
     return sim;
 }
@@ -96,10 +96,10 @@ int calc_mass(node a_node) {
 }
 
 // TODO rewrite this function!
-public lrel[tuple[node,loc],tuple[node,loc]] removeSymmetricPairs(lrel[tuple[node,loc],tuple[node,loc]] clonePairs) {
-    lrel[tuple[node,loc],tuple[node,loc]] newClonePairs = [];
+public lrel[node,node] removeSymmetricPairs(lrel[node,node] clonePairs) {
+    lrel[node,node] newClonePairs = [];
     for (pair <- clonePairs) {
-        tuple[tuple[node,loc],tuple[node,loc]] reversePair = <<pair[1][0],pair[1][1]>,<pair[0][0],pair[0][1]>>;
+        tuple[node, node] reversePair = <pair[1], pair[0]>;
         if (reversePair notin newClonePairs) {
             newClonePairs += pair;
         }
@@ -127,21 +127,25 @@ list[node] find_clones_type1(list[Declaration] asts, int treshold) {
 
     similairity_treshhold =  1.0;
 
+    // TODO rewrite this function!
     list[node] all_clones = [];
     for (b <- bucket) {
-        lrel[tuple[node,loc] left, tuple[node,loc] right] bucket_pairs = [];
-		bucket_pairs += bucket[b] * bucket[b];
-        //don't compare with itself
-		bucket_pairs = [pair | pair <- bucket_pairs, pair.left != pair.right];
-        //remove one of the the symmetric pairs, otherwise u count a clone double
-        bucket_pairs = removeSymmetricPairs(bucket_pairs);
+        if (size(bucket[b]) >= 2) {
+            lrel[node left, node right] bucket_pairs = [];
+            bucket_pairs += bucket[b] * bucket[b];
+            //don't compare with itself
+            bucket_pairs = [pair | pair <- bucket_pairs, pair.left != pair.right];
+            //remove one of the the symmetric pairs, otherwise u count a clone double
+            bucket_pairs = removeSymmetricPairs(bucket_pairs);
 
-        for (pair <- bucket_pairs) {
-            similairity_pair = similarity(bucket_pairs[0][0], bucket_pairs[1][0]);
-            if (similairity_pair >= similairity_treshhold) {
-                all_clones += similairity_pair;
+            for (pair <- bucket_pairs) {
+                similairity_pair = similarity(pair[0], pair[1]);
+                if (similairity_pair >= similairity_treshhold) {
+                    all_clones += pair[0];
+                    all_clones += pair[1];
+                }
             }
-        }
+        }   
     }
     
     return all_clones;
@@ -151,8 +155,9 @@ int main(int testArgument=0) {
     loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;;
     //loc folder_name = |file:///C:/Users/Mikev/Downloads/smallsql0.21_src/smallsql0.21_src|;
     list[Declaration] asts = getASTs(folder_name);
-    int clones_type1 = find_clones_type1(asts, 6);
+    list[node] clones_type1 = find_clones_type1(asts, 6);
+    int sum_clones_type1 = size(clones_type1);
 
-    println("argument: <clones_type1>");
+    println("argument: <sum_clones_type1>");
     return testArgument;
 }
