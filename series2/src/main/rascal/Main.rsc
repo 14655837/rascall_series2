@@ -91,26 +91,33 @@ int calc_mass(node a_node) {
     return counter;
 }
 
-real find_clones_type1(list[Declaration] asts, int treshold) {
-    real counter = 0.0;
-    for (ast <- asts) {
-        int mass = calc_mass(ast);
+int find_clones_type1(list[Declaration] asts, int treshold) {
+    map[int, list[node]] bucket = ();
+    visit(asts) {
+        case node n: {
+        int mass = calc_mass(n);
 
-        if (mass >= treshold)
-        visit(ast) {
-            case node n: {counter += 1.0;}
+        // puts the node in a bucket
+        if (mass >= treshold) {
+            if (mass in bucket) {
+                list[node] current_item = bucket[mass];
+                bucket[mass] = current_item + [n];
+            } else {
+                bucket[mass] = [n];
+            }
+            }
         }
     }
     
-    return counter;
+    return size(bucket);
 }
 
 int main(int testArgument=0) {
 
     loc folder_name = |file:///C:/Users/Mikev/Downloads/smallsql0.21_src/smallsql0.21_src|;
     list[Declaration] asts = getASTs(folder_name);
-    real numver_of_nodes = find_clones_type1(asts, 1);
+    int clones_type1 = find_clones_type1(asts, 1);
 
-    println("argument: <numver_of_nodes>");
+    println("argument: <clones_type1>");
     return testArgument;
 }
