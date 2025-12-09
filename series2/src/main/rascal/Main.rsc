@@ -59,7 +59,7 @@ list[Declaration] getASTs(loc projectLocation) {
 // L = number of different nodes in sub-tree 1
 // R = number of different nodes in sub-tree 2
 
-int similarity(list[Declaration] ast1, list[Declaration] ast2) {
+real similarity(list[Declaration] ast1, list[Declaration] ast2) {
     list[node] nodes_ast1 = [];
     list[node] nodes_ast2 = [];
 
@@ -76,7 +76,11 @@ int similarity(list[Declaration] ast1, list[Declaration] ast2) {
     list[node] only_ast1 = nodes_ast1 - nodes_ast2;
     list[node] only_ast2 = nodes_ast2 - nodes_ast1;
 
-    int sim = 2 * size(overlap) / (2 * size(overlap) + size(only_ast1) + size(only_ast2));
+    real S = toReal(size(overlap));
+    real R = toReal(size(only_ast1));
+    real L = toReal(size(only_ast2));
+
+    real sim = 2.0 * S / (2.0 * S + R + L);
 
     return sim;
 }
@@ -91,7 +95,7 @@ int calc_mass(node a_node) {
     return counter;
 }
 
-int find_clones_type1(list[Declaration] asts, int treshold) {
+list[nodes] find_clones_type1(list[Declaration] asts, int treshold) {
     map[int, list[node]] bucket = ();
     visit(asts) {
         case node n: {
@@ -108,13 +112,27 @@ int find_clones_type1(list[Declaration] asts, int treshold) {
             }
         }
     }
+
+    similairity_treshhold =  1.0;
+
+    list[nodes] all_clones = [];
+    for (b <- bucket) {
+        for (item1 <- b) {
+            for (item2 <- b) {
+                real sim = similarity(item1, item2);
+                if (sim > similairity_treshhold) {
+                    all_clones += [item1, item2];
+                }
+            }
+        }
+    }
     
-    return size(bucket);
+    return all_clones;
 }
 
 int main(int testArgument=0) {
-
-    loc folder_name = |file:///C:/Users/Mikev/Downloads/smallsql0.21_src/smallsql0.21_src|;
+    loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;;
+    //loc folder_name = |file:///C:/Users/Mikev/Downloads/smallsql0.21_src/smallsql0.21_src|;
     list[Declaration] asts = getASTs(folder_name);
     int clones_type1 = find_clones_type1(asts, 1);
 
