@@ -114,6 +114,12 @@ public node stripLocation(node n) {
     return unsetRec(n, "src");
 }
 
+public bool minLineCount(loc location, int lines) {
+	if (location.end.line - location.begin.line >= lines) {
+		return true;
+	}
+	return false;
+}
 
 
 list[node] find_clones_type1(list[Declaration] asts, int treshold) {
@@ -153,6 +159,9 @@ list[node] find_clones_type1(list[Declaration] asts, int treshold) {
             map[node, list[node]] exactBuckets = ();
             for (n_old <- bucket[b]) {
                 node n = stripLocation(n_old);
+                if (!minLineCount(n_old.src, 6)) {
+                    continue;
+                }
                 if (exactBuckets[n]?) {
                     exactBuckets[n] += [n];
                 } else {
@@ -177,7 +186,7 @@ list[node] find_clones_type1(list[Declaration] asts, int treshold) {
 
 int main(int testArgument=0) {
     loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;;
-    //loc folder_name = |file:///C:/Users/Mikev/Downloads/smallsql0.21_src/smallsql0.21_src|;
+    // loc folder_name = |file:///C:/Users/colin/Downloads/hsqldb-2.3.1/hsqldb-2.3.1/|;
     list[Declaration] asts = getASTs(folder_name);
     list[node] clones_type1 = find_clones_type1(asts, 25);
     int sum_clones_type1 = size(clones_type1);
