@@ -122,7 +122,7 @@ public bool minLineCount(loc location, int lines) {
 }
 
 
-list[node] find_clones_type1(list[Declaration] asts, int treshold) {
+list[list[node]] find_clones_type1(list[Declaration] asts, int treshold) {
     // Step 1: bucket by mass, like in your original version
     map[int, list[node]] bucket = ();
     visit(asts) {
@@ -141,14 +141,14 @@ list[node] find_clones_type1(list[Declaration] asts, int treshold) {
         }
     }
 
-    list[node] all_clones = [];
+    list[list[node]] all_clones = [];
     int doneBuckets = 0;
     int totalBuckets = size(bucket);
 
     // Step 2: for each mass-bucket, group by exact subtree
     for (b <- bucket) {
         doneBuckets += 1;
-        if (doneBuckets % 10 == 0) {
+        if (doneBuckets % 50 == 0) {
             println("Processed <doneBuckets>/<totalBuckets> buckets...");
         }
 
@@ -158,14 +158,18 @@ list[node] find_clones_type1(list[Declaration] asts, int treshold) {
             // group by exact subtree value inside the mass bucket
             map[node, list[node]] exactBuckets = ();
             for (n_old <- bucket[b]) {
-                node n = stripLocation(n_old);
+                if (!(n_old has src)) {
+                    continue;
+                }
                 if (!minLineCount(n_old.src, 6)) {
                     continue;
                 }
+                node n = stripLocation(n_old);
+
                 if (exactBuckets[n]?) {
-                    exactBuckets[n] += [n];
+                    exactBuckets[n] += [n_old];
                 } else {
-                    exactBuckets[n] = [n];
+                    exactBuckets[n] = [n_old];
                 }
             }
 
@@ -173,7 +177,7 @@ list[node] find_clones_type1(list[Declaration] asts, int treshold) {
             for (k <- exactBuckets) {
                 if (size(exactBuckets[k]) >= 2) {
                     // optionally show some structure
-                    all_clones += exactBuckets[k];
+                    all_clones += [exactBuckets[k]];
                 }
             }
 
@@ -184,13 +188,92 @@ list[node] find_clones_type1(list[Declaration] asts, int treshold) {
     return all_clones;
 }
 
+public int computeLOC(loc location){
+	int count = 0;
+	str content = readFile(location);
+	commentFree = visit(content){
+		case /(\/\*[\s\S]*?\*\/|\/\/[\s\S]*?(\n|\r))/ => ""
+	}
+	list[str] lines = split("\n",commentFree);
+	for( i <- lines, trim(i) != "")
+		count += 1;
+	return count;
+}
+
+void writeAndPrintReport(list[list[node]] clonesClasses, loc projectLocation) {
+
+    // calculate % of duplicate lines and biggest clone
+
+    num totalLines = 0;
+    num duplicateLines = 0;
+    num biggestCloneInLines = 0;
+
+    M3 model = createM3FromMavenProject(projectLocation);
+
+    for (f <- files(model.containment), isCompilationUnit(f)) {
+        totalLines += computeLOC(f);
+    }
+
+    for (clones <- clonesClasses) {
+        num classSize = size(clones);
+        num loc_per_clone = computeLOC(clones[0].src);
+        if (loc_per_clone > biggestCloneInLines) {
+            biggestCloneInLines = loc_per_clone;
+            node biggestClone = clones[0];
+        }
+        duplicateLines += loc_per_clone * classSize;
+    }
+
+    num duplicatePercentage = (duplicateLines / totalLines) * 100.0;
+
+    // calculate number of clones
+    num totalClones = 0;
+    for (clones <- clonesClasses) {
+        totalClones += size(clones);
+    }
+
+    // calculate number of clone classes
+    num totalCloneClasses = size(clonesClasses);
+
+
+    // print and write report
+
+    // str output = "";
+
+    // output += "{";
+    // output += "\n  \"totalLines\": <totalLines>,";
+    // output += "\n  \"duplicateLines\": <duplicateLines>,";
+    // output += "\n  \"duplicatePercentage\": <duplicatePercentage>,";
+    // output += "\n  \"totalClones\": <totalClones>,";
+    // output += "\n  \"totalCloneClasses\": <totalCloneClasses>,";
+    // output += "\n  \"biggestCloneInLines\": <biggestCloneInLines>";
+    // output += "\n}";
+    println("Total lines of code: <totalLines>");
+    println("Total duplicate lines of code: <duplicateLines> (<duplicatePercentage>% )");
+    println("Total number of clones: <totalClones>");
+    println("Total number of clone classes: <totalCloneClasses>");
+    println("Biggest clone class size in lines: <biggestCloneInLines>");
+
+
+    // print up to 5 example clones
+    // println("Example biggest clone: <biggestClone>");
+
+    // for clones <- take(clonesClasses, 5) {
+    //     println("Clone class:");
+    //     for (clone <- clones) {
+    //         println(" - <clone.src>");
+    //     }
+    // }
+}
+
+
 int main(int testArgument=0) {
-    loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;;
+    loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;
     // loc folder_name = |file:///C:/Users/colin/Downloads/hsqldb-2.3.1/hsqldb-2.3.1/|;
     list[Declaration] asts = getASTs(folder_name);
-    list[node] clones_type1 = find_clones_type1(asts, 25);
-    int sum_clones_type1 = size(clones_type1);
+    list[list[node]] clones_type1 = find_clones_type1(asts, 5);
 
-    println("argument: <sum_clones_type1>");
+    writeAndPrintReport(clones_type1, folder_name);
+
     return testArgument;
 }
