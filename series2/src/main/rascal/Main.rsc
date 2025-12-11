@@ -111,16 +111,63 @@ public lrel[node,node] removeSymmetricPairs(lrel[node,node] clonePairs) {
 public node stripLocation(node n) {
     // Recursively remove the `src` keyword parameter from the key node
     // (We keep the original node with src separate in `original`)
-    return unsetRec(n, "src");
+    n = unsetRec(n);
+    return n;
 }
 
 public bool minLineCount(loc location, int lines) {
-	if (location.end.line - location.begin.line >= lines) {
+    int totalLines = location.end.line - location.begin.line;
+	if (totalLines >= lines) {
+        // println("Location <location> has <totalLines> lines.");
 		return true;
 	}
 	return false;
 }
 
+// helper: true if inner is strictly inside outer (same file, smaller range)
+public bool isInside(loc inner, loc outer) {
+    return inner.scheme == outer.scheme
+        && inner.authority == outer.authority
+        && inner.path == outer.path
+        && outer.offset <= inner.offset
+        && outer.offset + outer.length >= inner.offset + inner.length
+        && (inner.offset != outer.offset || inner.length != outer.length);
+}
+
+// "Similar" to your Java approach: treat every clone node as a candidate
+// and drop those that live *inside* another clone.
+public list[list[node]] removeChildClonesPerClass(list[list[node]] cloneClasses) {
+    list[list[node]] result = [];
+
+    for (cls <- cloneClasses) {
+        set[node] toRemove = {};
+
+        for (n <- cls) {
+            // check if n is inside some *other* node in the same clone classes
+            for (otherCls <- cloneClasses) {
+                for (m <- otherCls) {
+                    if (n == m || !(m has src)) {
+                        continue;
+                    }
+                    if (isInside(n.src, m.src)) {
+                        toRemove += { n };
+                        break;
+                    }
+                }
+                if (n in toRemove) {
+                    break;
+                }
+            }
+        }
+
+        list[node] filtered = [ n | n <- cls, !(n in toRemove) ];
+        if (size(filtered) >= 2) {
+            result += [ filtered ];
+        }
+    }
+
+    return result;
+}
 
 list[list[node]] find_clones_type1(list[Declaration] asts, int treshold) {
     // Step 1: bucket by mass, like in your original version
@@ -128,7 +175,6 @@ list[list[node]] find_clones_type1(list[Declaration] asts, int treshold) {
     visit(asts) {
         case node n: {
             int mass = calc_mass(n);
-
             // puts the node in a bucket
             if (mass >= treshold) {
                 if (mass in bucket) {
@@ -165,13 +211,15 @@ list[list[node]] find_clones_type1(list[Declaration] asts, int treshold) {
                     continue;
                 }
                 node n = stripLocation(n_old);
-
+                // println("n: <n>\n\n\n");
+                // println("Processing node with src: <n_old.src>");
                 if (exactBuckets[n]?) {
                     exactBuckets[n] += [n_old];
                 } else {
                     exactBuckets[n] = [n_old];
                 }
-            }
+                
+            }            
 
             // Each exactBucket with size >= 2 is a Type I clone class
             for (k <- exactBuckets) {
@@ -180,10 +228,10 @@ list[list[node]] find_clones_type1(list[Declaration] asts, int treshold) {
                     all_clones += [exactBuckets[k]];
                 }
             }
-
-
         }
     }
+
+    all_clones = removeChildClonesPerClass(all_clones);
 
     return all_clones;
 }
@@ -200,7 +248,7 @@ public int computeLOC(loc location){
 	return count;
 }
 
-void writeAndPrintReport(list[list[node]] clonesClasses, loc projectLocation) {
+void writeAndPrintReport(list[list[node]] cloneClasses, loc projectLocation, loc jsonOutputLocation) {
 
     // calculate % of duplicate lines and biggest clone
 
@@ -214,7 +262,7 @@ void writeAndPrintReport(list[list[node]] clonesClasses, loc projectLocation) {
         totalLines += computeLOC(f);
     }
 
-    for (clones <- clonesClasses) {
+    for (clones <- cloneClasses) {
         num classSize = size(clones);
         num loc_per_clone = computeLOC(clones[0].src);
         if (loc_per_clone > biggestCloneInLines) {
@@ -228,52 +276,94 @@ void writeAndPrintReport(list[list[node]] clonesClasses, loc projectLocation) {
 
     // calculate number of clones
     num totalClones = 0;
-    for (clones <- clonesClasses) {
+    for (clones <- cloneClasses) {
         totalClones += size(clones);
     }
 
     // calculate number of clone classes
-    num totalCloneClasses = size(clonesClasses);
+    num totalCloneClasses = size(cloneClasses);
 
 
     // print and write report
 
-    // str output = "";
+    str output = "";
 
-    // output += "{";
-    // output += "\n  \"totalLines\": <totalLines>,";
-    // output += "\n  \"duplicateLines\": <duplicateLines>,";
-    // output += "\n  \"duplicatePercentage\": <duplicatePercentage>,";
-    // output += "\n  \"totalClones\": <totalClones>,";
-    // output += "\n  \"totalCloneClasses\": <totalCloneClasses>,";
-    // output += "\n  \"biggestCloneInLines\": <biggestCloneInLines>";
-    // output += "\n}";
+    output += "{";
+    output += "\n  \"totalLines\": <totalLines>,";
+    output += "\n  \"duplicateLines\": <duplicateLines>,";
+    output += "\n  \"duplicatePercentage\": <duplicatePercentage>,";
+    output += "\n  \"totalClones\": <totalClones>,";
+    output += "\n  \"totalCloneClasses\": <totalCloneClasses>,";
+    output += "\n  \"biggestCloneInLines\": <biggestCloneInLines>,";
+
     println("Total lines of code: <totalLines>");
     println("Total duplicate lines of code: <duplicateLines> (<duplicatePercentage>% )");
     println("Total number of clones: <totalClones>");
     println("Total number of clone classes: <totalCloneClasses>");
     println("Biggest clone class size in lines: <biggestCloneInLines>");
 
+    println("=== Example clone classes ===");
 
-    // print up to 5 example clones
-    // println("Example biggest clone: <biggestClone>");
+    // start JSON field for example clone classes
+    output += "\n  \"exampleCloneClasses\": {";
 
-    // for clones <- take(clonesClasses, 5) {
-    //     println("Clone class:");
-    //     for (clone <- clones) {
-    //         println(" - <clone.src>");
-    //     }
-    // }
+    int shown = 0;
+    bool firstClass = true;
+
+    for (list[node] cls <- cloneClasses) {
+        shown += 1;
+
+        // JSON ALWAYS gets written
+        if (!firstClass) {
+            output += ",\n";
+        } else {
+            output += "\n";
+            firstClass = false;
+        }
+
+        // JSON: always output every clone class
+        output += "    \"CloneClass<shown>\": [";
+
+        bool firstClone = true;
+        for (node c <- cls) {
+            if (!firstClone) {
+                output += ", ";
+            } else {
+                firstClone = false;
+            }
+            output += "\"<c.src>\"";
+        }
+
+        output += "]";
+
+        // Console: ONLY print first 5 classes
+        if (shown <= 5) {
+            println("\nClone class <shown> (size = <size(cls)>):");
+            for (node c <- cls) {
+                println("  - <c.src>");
+            }
+        } else if (shown == 6) {
+            println("\n... (remaining clone classes omitted from console output)");
+        }
+    }
+
+    // close exampleCloneClasses object and the top-level JSON object
+    output += "\n  }\n";
+    output += "}\n";
+    writeFile(jsonOutputLocation, output);
 }
+
 
 
 int main(int testArgument=0) {
     loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;
     // loc folder_name = |file:///C:/Users/colin/Downloads/hsqldb-2.3.1/hsqldb-2.3.1/|;
+    // loc folder_name = |file:///C:/Users/colin/Desktop/rascal/rascall_series2/test_files|;
+    loc jsonOutputLocation = |file:///C:/Users/colin/Desktop/rascal/rascall_series2/clone_report_type1.json|;
     list[Declaration] asts = getASTs(folder_name);
     list[list[node]] clones_type1 = find_clones_type1(asts, 5);
 
-    writeAndPrintReport(clones_type1, folder_name);
+    writeAndPrintReport(clones_type1, folder_name, jsonOutputLocation);
 
     return testArgument;
 }

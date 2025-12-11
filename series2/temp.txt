@@ -1,0 +1,421 @@
+module Main
+
+import util::IDEServices;
+import lang::java::m3::Core;
+import lang::java::m3::AST;
+
+import IO;
+import List;
+import Set;
+import String;
+import Map;
+import Node;
+import ListRelation;
+
+// Definitions:
+
+map[node, lrel[node, loc]] buckets = ();
+map[node, lrel[tuple[node, loc], tuple[node, loc]]] cloneClasses = ();
+list[node] subCloneClasses = [];
+
+// lrel[loc location,int LOC, real percentage, set[loc] clones] fileInformation = [];
+
+
+// Definition Type I: exact copy, ignoring whitespace and comments.
+// int x ▷◁ int x and int x ̸ ▷◁ int y
+// Definition Type II: syntactical copy, changes allowed in variable, type, function identifiers.
+// int x ▷◁ int y
+// Definition Type III: copy with changed, added, and deleted statements.
+// print(a); print(c) ▷◁ print(a); print(b); print(c)
+// Definition Type IV: functionality is the same, code may be completely different.
+// a && b ▷◁ a ? b : false
+
+// Ast creator
+list[Declaration] getASTs(loc projectLocation) {
+    M3 model = createM3FromMavenProject(projectLocation);
+    list[Declaration] asts = [createAstFromFile(f, true)
+        | f <- files(model.containment), isCompilationUnit(f)];
+    return asts;
+}
+
+// Task 1
+
+// An AST-based clone detector whose back-end is written in Rascal that
+// detects at least Type I clones in a Java project:
+// • Detected clone classes are written to a file in a textual representation.
+// • Clone classes that are strictly included in others are dropped from
+// the results (subsumption)
+
+// Algoritm:
+// 1. Clones=∅
+// 2. For each subtree i:
+// If mass(i)>=MassThreshold
+// Then hash i to bucket
+// 3. For each subtree i and j in the same bucket
+// If CompareTree(i,j) > SimilarityThreshold
+// Then { For each subtree s of i
+//  If IsMember(Clones,s)
+//  Then RemoveClonePair(Clones,s)
+// For each subtree s of j
+//  If IsMember(Clones,s)
+//  Then RemoveClonePair(Clones,s)
+// AddClonePair(Clones,i,j)
+//  }
+
+// Similarity = 2 x S / (2 x S + L + R)
+// Where,
+// S = number of shared nodes
+// L = number of different nodes in sub-tree 1
+// R = number of different nodes in sub-tree 2
+
+public num calculateSimilarity(node t1, node t2) {
+	//Similarity = 2 x S / (2 x S + L + R)
+
+	list[node] tree1 = [];
+	list[node] tree2 = [];
+	
+	visit (t1) {
+		case node n: {
+            n_stripped = stripLocation(n);
+			tree1 += n_stripped;
+		}
+	}
+	
+	visit (t2) {
+		case node n: {
+            n_stripped = stripLocation(n);
+			tree2 += n_stripped;
+		}
+	}
+	
+	num s = size(tree1 & tree2);
+	num l = size(tree1 - tree2);
+	num r = size(tree2 - tree1); 
+		
+	num similarity = (2 * s) / (2 * s + l + r); 
+	
+	return similarity;
+}
+
+int calc_mass(node a_node) {
+    int counter = 0;
+
+    visit(a_node) {
+        case node n: {counter += 1;}
+    }
+
+    return counter;
+}
+
+// TODO rewrite this function!
+public lrel[tuple[node,loc],tuple[node,loc]] removeSymmetricPairs(lrel[tuple[node,loc],tuple[node,loc]] clonePairs) {
+	// Remove one of the symmetric pairs (a,b) & (b,a) should result in only one of the two.
+	lrel[tuple[node,loc],tuple[node,loc]] newClonePairs = [];
+	for (pair <- clonePairs) {
+		tuple[tuple[node,loc],tuple[node,loc]] reversePair = <<pair[1][0],pair[1][1]>,<pair[0][0],pair[0][1]>>;
+		if (reversePair notin newClonePairs) {		
+			newClonePairs += pair;
+		}
+	}
+	return newClonePairs;
+}
+
+public node stripLocation(node n) {
+    // Recursively remove the `src` keyword parameter from the key node
+    // (We keep the original node with src separate in `original`)
+    return unsetRec(n, "src");
+}
+
+public bool minLineCount(loc location, int lines) {
+	if (location.end.line - location.begin.line >= lines) {
+		return true;
+	}
+	return false;
+}
+
+public loc getLocationOfNode(node subTree, loc currentProject) {
+	loc location = currentProject;
+	
+	if (Declaration d := subTree) { 
+		if (d.src?) {
+			location = d.src;
+		}
+	} else if (Expression e := subTree) {
+		if (e.src?) {
+			location = e.src;
+		}
+	} else if (Statement s := subTree) {
+		if (s.src?) {
+			location = s.src;
+		}
+	}
+	
+	return location;
+}
+
+
+
+public void addSubTreeToMap(node key, node subTree , loc currentProject) {
+
+	loc location = getLocationOfNode(subTree, currentProject);
+	
+	if (location == currentProject) {
+		return;
+	}
+	
+	if (minLineCount(location, 6) == false) {
+		return;
+	}
+	
+    key = stripLocation(key);
+
+	if (buckets[key]?) {
+        buckets[key] += <subTree,location>;
+	} else {
+		buckets[key] = [<subTree,location>];
+	}
+}
+
+public bool isMemberOfClones(tuple[node,loc] current) {
+
+	for (currentcloneClass <- cloneClasses) {
+		for (currentPair <- cloneClasses[currentcloneClass]) {
+			if ((current[1] <= currentPair[0][1] && currentPair[0][0] == current[0]) || (current[1] <= currentPair[1][1] && currentPair[1][0] == current[0])) {
+				if (cloneClasses[current[0]]?) {
+					if (size(cloneClasses[current[0]]) == size(cloneClasses[currentcloneClass])) {
+						return true;
+					}
+				}
+			} 
+		}
+	}
+	
+	return false;
+}
+
+public void checkForInnerClones(tuple[node,loc] tree,int threshold, loc currentProject) {
+	visit (tree[0]) {
+		case node x: {
+			// Only if the tree is not equal to itself, and has a certain mass.
+			if (x != tree[0]) {
+				if (calc_mass(x) >= threshold) {
+					loc location = getLocationOfNode(x, currentProject);
+					bool save = true;
+					if (location == currentProject) {
+						save = false;
+					}
+					if (save) {
+						tuple[node,loc] current = <x, location>;
+						bool member = isMemberOfClones(current);
+						
+						if (member) {
+                            subCloneClasses += x;
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+map[node, lrel[tuple[node, loc], tuple[node, loc]]] find_clones_type1(list[Declaration] ast, int threshold, loc currentProject) {
+    // Step 1: bucket by mass, like in your original version
+    buckets = ();
+	cloneClasses = ();
+	subCloneClasses = [];
+	fileInformation = [];
+
+    visit(ast) {
+        case node n: {
+            int mass = calc_mass(n);
+
+            // puts the node in a bucket
+            if (mass >= threshold) {
+                addSubTreeToMap(n, n, currentProject);
+            }
+        }
+    }
+
+    // list[list[node]] all_clones = [];
+    // int doneBuckets = 0;
+    // int totalBuckets = size(bucket);
+
+    // Step 2: for each mass-bucket, group by exact subtree
+    // for (b <- bucket) {
+    //     doneBuckets += 1;
+    //     if (doneBuckets % 50 == 0) {
+    //         println("Processed <doneBuckets>/<totalBuckets> buckets...");
+    //     }
+
+    //     int bucketSize = size(bucket[b]);
+    //     if (bucketSize >= 2) {
+
+    //         // group by exact subtree value inside the mass bucket
+    //         map[node, list[node]] exactBuckets = ();
+    //         for (n_old <- bucket[b]) {
+    //             if (!(n_old has src)) {
+    //                 continue;
+    //             }
+    //             if (!minLineCount(n_old.src, 6)) {
+    //                 continue;
+    //             }
+    //             node n = stripLocation(n_old);
+
+    //             if (exactBuckets[n]?) {
+    //                 exactBuckets[n] += [n_old];
+    //             } else {
+    //                 exactBuckets[n] = [n_old];
+    //             }
+    //         }
+
+    //         // Each exactBucket with size >= 2 is a Type I clone class
+    //         for (k <- exactBuckets) {
+    //             if (size(exactBuckets[k]) >= 2) {
+    //                 // optionally show some structure
+    //                 all_clones += [exactBuckets[k]];
+    //             }
+    //         }
+
+
+    //     }
+    // }
+    println("Starting detailed comparison of subtrees in buckets... <size(buckets)> buckets to process.");
+    for (bucket <- buckets) {
+		if (size(buckets[bucket]) >= 2) {
+            println("Processing bucket with <size(buckets[bucket])> elements...");
+			lrel[tuple[node,loc] L, tuple[node,loc] R] complementBucket = [];
+			complementBucket += buckets[bucket] * buckets[bucket];
+			// Removing reflective pairs
+			complementBucket = [p | p <- complementBucket, p.L != p.R];
+			// Cleanup symmetric clones, they are useless.
+			complementBucket = removeSymmetricPairs(complementBucket);
+
+            for (treeRelation <- complementBucket) {
+				println("Comparing two subtrees...");
+                num similarity = calculateSimilarity(treeRelation[0][0], treeRelation[1][0])*1.0;
+                println("Similarity: <similarity>");
+
+                if (similarity >= 1.0) {
+                    if (cloneClasses[treeRelation[0][0]]?) {
+                        cloneClasses[treeRelation[0][0]] += treeRelation;
+                    } else {
+                        cloneClasses[treeRelation[0][0]] = [treeRelation];
+                    }
+				}
+			}
+		}
+	}
+
+    for (currentClass <- cloneClasses) {
+		for (currentClone <- cloneClasses[currentClass]) {
+			checkForInnerClones(currentClone[0], threshold, currentProject);
+			checkForInnerClones(currentClone[1], threshold, currentProject);
+		}
+	}
+
+    // Remove the subclones one by one from the cloneClasses.
+	for (subCloneClas <- subCloneClasses) {
+		cloneClasses = delete(cloneClasses, subCloneClas);
+	}
+    return cloneClasses;
+}
+
+public int computeLOC(loc location){
+	int count = 0;
+	str content = readFile(location);
+	commentFree = visit(content){
+		case /(\/\*[\s\S]*?\*\/|\/\/[\s\S]*?(\n|\r))/ => ""
+	}
+	list[str] lines = split("\n",commentFree);
+	for( i <- lines, trim(i) != "")
+		count += 1;
+	return count;
+}
+
+
+void writeAndPrintReport(map[node, lrel[tuple[node, loc], tuple[node, loc]]] cloneClasses, loc projectLocation) {
+
+    // calculate % of duplicate lines and biggest clone
+
+    num totalLines = 0;
+    num duplicateLines = 0;
+    num biggestCloneInLines = 0;
+    int counting = 0;
+
+    M3 model = createM3FromMavenProject(projectLocation);
+
+    for (f <- files(model.containment), isCompilationUnit(f)) {
+        totalLines += computeLOC(f);
+    }
+
+    for (currentClass <- cloneClasses) {
+
+        set[loc] clonePairsPerClass = {};
+        for (currentClone <- cloneClasses[currentClass]) {
+			clonePairsPerClass += currentClone[0][1];
+			clonePairsPerClass += currentClone[1][1];
+			counting += 1;
+		}
+        
+        // num loc_per_clone = computeLOC(currentClone[0].src);
+        // if (loc_per_clone > biggestCloneInLines) {
+        //     biggestCloneInLines = loc_per_clone;
+        //     node biggestClone = clones[0];
+        // }
+        // duplicateLines += loc_per_clone * classSize;
+    }
+
+    // num duplicatePercentage = (duplicateLines / totalLines) * 100.0;
+
+    // calculate number of clones
+    // num totalClones = 0;
+    // for (clones <- clonesClasses) {
+    //     totalClones += size(clones);
+    // }
+
+    // calculate number of clone classes
+    // num totalCloneClasses = size(clonesClasses);
+
+
+    // print and write report
+
+    // str output = "";
+
+    // output += "{";
+    // output += "\n  \"totalLines\": <totalLines>,";
+    // output += "\n  \"duplicateLines\": <duplicateLines>,";
+    // output += "\n  \"duplicatePercentage\": <duplicatePercentage>,";
+    // output += "\n  \"totalClones\": <totalClones>,";
+    // output += "\n  \"totalCloneClasses\": <totalCloneClasses>,";
+    // output += "\n  \"biggestCloneInLines\": <biggestCloneInLines>";
+    // output += "\n}";
+    // println("Total lines of code: <totalLines>");
+    // println("Total duplicate lines of code: <duplicateLines> (<duplicatePercentage>% )");
+    // println("Total number of clones: <totalClones>");
+    // println("Total number of clone classes: <totalCloneClasses>");
+    // println("Biggest clone class size in lines: <biggestCloneInLines>");
+
+    println("Total clone pairs found: <counting>");
+
+    // print up to 5 example clones
+    // println("Example biggest clone: <biggestClone>");
+
+    // for clones <- take(clonesClasses, 5) {
+    //     println("Clone class:");
+    //     for (clone <- clones) {
+    //         println(" - <clone.src>");
+    //     }
+    // }
+}
+
+
+int main(int testArgument=0) {
+    loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;
+    // loc folder_name = |file:///C:/Users/colin/Downloads/hsqldb-2.3.1/hsqldb-2.3.1/|;
+    list[Declaration] asts = getASTs(folder_name);
+    cloneClasses = find_clones_type1(asts, 25, folder_name);
+
+    writeAndPrintReport(cloneClasses, folder_name);
+
+    return testArgument;
+}
