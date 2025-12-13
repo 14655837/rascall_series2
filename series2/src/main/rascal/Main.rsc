@@ -60,6 +60,19 @@ list[Declaration] getASTs(loc projectLocation) {
 // L = number of different nodes in sub-tree 1
 // R = number of different nodes in sub-tree 2
 
+// TODO rewrite this function!
+// NOT USED NOW!!
+public lrel[node,node] removeSymmetricPairs(lrel[node,node] clone_pairs) {
+    lrel[node,node] new_clone_pairs = [];
+    for (pair <- clone_pairs) {
+        tuple[node, node] reverse_pair = <pair[1], pair[0]>;
+        if (reverse_pair notin new_clone_pairs) {
+            new_clone_pairs += pair;
+        }
+    }
+    return new_clone_pairs;
+}
+
 num similarity(node ast1, node ast2) {
     list[node] nodes_ast1 = [];
     list[node] nodes_ast2 = [];
@@ -96,26 +109,14 @@ int calc_mass(node a_node) {
     return counter;
 }
 
-// TODO rewrite this function!
-public lrel[node,node] removeSymmetricPairs(lrel[node,node] clonePairs) {
-    lrel[node,node] newClonePairs = [];
-    for (pair <- clonePairs) {
-        tuple[node, node] reversePair = <pair[1], pair[0]>;
-        if (reversePair notin newClonePairs) {
-            newClonePairs += pair;
-        }
-    }
-    return newClonePairs;
-}
-
-public node stripLocation(node n) {
+node strip_location(node n) {
     // Recursively remove the `src` keyword parameter from the key node
     // (We keep the original node with src separate in `original`)
     n = unsetRec(n);
     return n;
 }
 
-public bool minLineCount(loc location, int lines) {
+bool min_line_count(loc location, int lines) {
     int totalLines = location.end.line - location.begin.line;
 	if (totalLines >= lines) {
         // println("Location <location> has <totalLines> lines.");
@@ -125,7 +126,7 @@ public bool minLineCount(loc location, int lines) {
 }
 
 // helper: true if inner is strictly inside outer (same file, smaller range)
-public bool isInside(loc inner, loc outer) {
+bool is_inside(loc inner, loc outer) {
     return inner.scheme == outer.scheme
         && inner.authority == outer.authority
         && inner.path == outer.path
@@ -136,31 +137,31 @@ public bool isInside(loc inner, loc outer) {
 
 // "Similar" to your Java approach: treat every clone node as a candidate
 // and drop those that live *inside* another clone.
-public list[list[node]] removeChildClonesPerClass(list[list[node]] cloneClasses) {
+list[list[node]] remove_child_clones_per_class(list[list[node]] clone_classes) {
     list[list[node]] result = [];
 
-    for (cls <- cloneClasses) {
-        set[node] toRemove = {};
+    for (cls <- clone_classes) {
+        set[node] to_remove = {};
 
         for (n <- cls) {
             // check if n is inside some *other* node in the same clone classes
-            for (otherCls <- cloneClasses) {
-                for (m <- otherCls) {
+            for (other_cls <- clone_classes) {
+                for (m <- other_cls) {
                     if (n == m || !(m has src)) {
                         continue;
                     }
-                    if (isInside(n.src, m.src)) {
-                        toRemove += { n };
+                    if (is_inside(n.src, m.src)) {
+                        to_remove += { n };
                         break;
                     }
                 }
-                if (n in toRemove) {
+                if (n in to_remove) {
                     break;
                 }
             }
         }
 
-        list[node] filtered = [ n | n <- cls, !(n in toRemove) ];
+        list[node] filtered = [ n | n <- cls, !(n in to_remove) ];
         if (size(filtered) >= 2) {
             result += [ filtered ];
         }
@@ -188,100 +189,105 @@ list[list[node]] find_clones_type1(list[Declaration] asts, int treshold) {
     }
 
     list[list[node]] all_clones = [];
-    int doneBuckets = 0;
-    int totalBuckets = size(bucket);
+    int done_buckets = 0;
+    int total_buckets = size(bucket);
 
     // Step 2: for each mass-bucket, group by exact subtree
     for (b <- bucket) {
-        doneBuckets += 1;
-        if (doneBuckets % 50 == 0) {
-            println("Processed <doneBuckets>/<totalBuckets> buckets...");
+        done_buckets += 1;
+        if (done_buckets % 50 == 0) {
+            println("Processed <done_buckets>/<total_buckets> buckets...");
         }
 
         int bucketSize = size(bucket[b]);
         if (bucketSize >= 2) {
 
             // group by exact subtree value inside the mass bucket
-            map[node, list[node]] exactBuckets = ();
+            map[node, list[node]] exact_buckets = ();
             for (n_old <- bucket[b]) {
                 if (!(n_old has src)) {
                     continue;
                 }
-                if (!minLineCount(n_old.src, 6)) {
+                if (!min_line_count(n_old.src, 6)) {
                     continue;
                 }
-                node n = stripLocation(n_old);
+                node n = strip_location(n_old);
                 // println("n: <n>\n\n\n");
                 // println("Processing node with src: <n_old.src>");
-                if (exactBuckets[n]?) {
-                    exactBuckets[n] += [n_old];
+                if (exact_buckets[n]?) {
+                    exact_buckets[n] += [n_old];
                 } else {
-                    exactBuckets[n] = [n_old];
+                    exact_buckets[n] = [n_old];
                 }
                 
             }            
 
             // Each exactBucket with size >= 2 is a Type I clone class
-            for (k <- exactBuckets) {
-                if (size(exactBuckets[k]) >= 2) {
+            for (k <- exact_buckets) {
+                if (size(exact_buckets[k]) >= 2) {
                     // optionally show some structure
-                    all_clones += [exactBuckets[k]];
+                    all_clones += [exact_buckets[k]];
                 }
             }
         }
     }
 
-    all_clones = removeChildClonesPerClass(all_clones);
+    all_clones = remove_child_clones_per_class(all_clones);
 
     return all_clones;
 }
 
-public int computeLOC(loc location){
+int compute_LOC(loc location){
 	int count = 0;
 	str content = readFile(location);
-	commentFree = visit(content){
+	comment_free = visit(content){
 		case /(\/\*[\s\S]*?\*\/|\/\/[\s\S]*?(\n|\r))/ => ""
 	}
-	list[str] lines = split("\n",commentFree);
+	list[str] lines = split("\n", comment_free);
 	for( i <- lines, trim(i) != "")
 		count += 1;
 	return count;
 }
 
-void writeAndPrintReport(list[list[node]] cloneClasses, loc projectLocation, loc jsonOutputLocation) {
+void write_and_print_report(list[list[node]] clone_classes, loc project_location, loc json_output_location) {
 
     // calculate % of duplicate lines and biggest clone
 
-    num totalLines = 0;
-    num duplicateLines = 0;
-    num biggestCloneInLines = 0;
+    num total_lines = 0;
+    num duplicate_lines = 0;
+    num biggest_clone_in_lines = 0;
 
-    M3 model = createM3FromMavenProject(projectLocation);
+    M3 model = createM3FromMavenProject(project_location);
+
+    // map lines per file
+    map[loc, int] lines_per_file = ();
 
     for (f <- files(model.containment), isCompilationUnit(f)) {
-        totalLines += computeLOC(f);
+        int lines_in_file = compute_LOC(f);
+        total_lines += lines_in_file;
+        lines_per_file[f] = lines_in_file;
     }
 
-    for (clones <- cloneClasses) {
-        num classSize = size(clones);
-        num loc_per_clone = computeLOC(clones[0].src);
-        if (loc_per_clone > biggestCloneInLines) {
-            biggestCloneInLines = loc_per_clone;
-            node biggestClone = clones[0];
+    for (clones <- clone_classes) {
+        num class_size = size(clones);
+        num loc_per_clone = compute_LOC(clones[0].src);
+        if (loc_per_clone > biggest_clone_in_lines) {
+            biggest_clone_in_lines = loc_per_clone;
+            node biggest_clone = clones[0];
         }
-        duplicateLines += loc_per_clone * classSize;
+        duplicate_lines += loc_per_clone * class_size;
     }
 
-    num duplicatePercentage = (duplicateLines / totalLines) * 100.0;
+    num duplicate_percentage = (duplicate_lines / total_lines) * 100.0;
 
     // calculate number of clones
-    num totalClones = 0;
-    for (clones <- cloneClasses) {
-        totalClones += size(clones);
+    num total_clones = 0;
+    for (clones <- clone_classes) {
+        total_clones += size(clones);
     }
 
     // calculate number of clone classes
-    num totalCloneClasses = size(cloneClasses);
+    num total_clone_classes = size(clone_classes);
 
 
     // print and write report
@@ -289,47 +295,47 @@ void writeAndPrintReport(list[list[node]] cloneClasses, loc projectLocation, loc
     str output = "";
 
     output += "{";
-    output += "\n  \"totalLines\": <totalLines>,";
-    output += "\n  \"duplicateLines\": <duplicateLines>,";
-    output += "\n  \"duplicatePercentage\": <duplicatePercentage>,";
-    output += "\n  \"totalClones\": <totalClones>,";
-    output += "\n  \"totalCloneClasses\": <totalCloneClasses>,";
-    output += "\n  \"biggestCloneInLines\": <biggestCloneInLines>,";
+    output += "\n  \"total_lines\": <total_lines>,";
+    output += "\n  \"duplicate_lines\": <duplicate_lines>,";
+    output += "\n  \"duplicate_percentage\": <duplicate_percentage>,";
+    output += "\n  \"total_clones\": <total_clones>,";
+    output += "\n  \"total_clone_classes\": <total_clone_classes>,";
+    output += "\n  \"biggest_clone_in_lines\": <biggest_clone_in_lines>,";
 
-    println("Total lines of code: <totalLines>");
-    println("Total duplicate lines of code: <duplicateLines> (<duplicatePercentage>% )");
-    println("Total number of clones: <totalClones>");
-    println("Total number of clone classes: <totalCloneClasses>");
-    println("Biggest clone class size in lines: <biggestCloneInLines>");
+    println("Total lines of code: <total_lines>");
+    println("Total duplicate lines of code: <duplicate_lines> (<duplicate_percentage>% )");
+    println("Total number of clones: <total_clones>");
+    println("Total number of clone classes: <total_clone_classes>");
+    println("Biggest clone class size in lines: <biggest_clone_in_lines>");
 
     println("=== Example clone classes ===");
 
     // start JSON field for example clone classes
-    output += "\n  \"exampleCloneClasses\": {";
+    output += "\n  \"example_clone_classes\": {";
 
     int shown = 0;
-    bool firstClass = true;
+    bool first_class = true;
 
-    for (list[node] cls <- cloneClasses) {
+    for (list[node] cls <- clone_classes) {
         shown += 1;
 
         // JSON ALWAYS gets written
-        if (!firstClass) {
+        if (!first_class) {
             output += ",\n";
         } else {
             output += "\n";
-            firstClass = false;
+            first_class = false;
         }
 
         // JSON: always output every clone class
-        output += "    \"CloneClass<shown>\": [";
+        output += "    \"Clone_class<shown>\": [";
 
-        bool firstClone = true;
+        bool first_clone = true;
         for (node c <- cls) {
-            if (!firstClone) {
+            if (!first_clone) {
                 output += ", ";
             } else {
-                firstClone = false;
+                first_clone = false;
             }
             output += "\"<c.src>\"";
         }
@@ -347,23 +353,53 @@ void writeAndPrintReport(list[list[node]] cloneClasses, loc projectLocation, loc
         }
     }
 
+    output += "\n  },";
+    output += "\n  \"lines_per_file\": {";
+
+    shown = 0;
+    first_class = true;
+
+    for (f <- lines_per_file) {
+        shown += 1;
+
+        if (!first_class) {
+            output += ",\n";
+        } else {
+            output += "\n";
+            first_class = false;
+        }
+        output += "    \"<f>\": <lines_per_file[f]>";
+
+        if (shown <= 5) {
+            println("\nFile <f> has <lines_per_file[f]> lines");
+        } else if (shown == 6) {
+            println("\n... (remaining file lengths omitted from console output)");
+        }
+    }
+
+
     // close exampleCloneClasses object and the top-level JSON object
     output += "\n  }\n";
     output += "}\n";
-    writeFile(jsonOutputLocation, output);
+    writeFile(json_output_location, output);
 }
 
-
-
 int main(int testArgument=0) {
-    loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;
+    // loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;
     // loc folder_name = |file:///C:/Users/colin/Downloads/hsqldb-2.3.1/hsqldb-2.3.1/|;
     // loc folder_name = |file:///C:/Users/colin/Desktop/rascal/rascall_series2/test_files|;
-    loc jsonOutputLocation = |file:///C:/Users/colin/Desktop/rascal/rascall_series2/clone_report_type1.json|;
+    //loc folder_name = |file:///C:/Users/Mikev/Downloads/smallsql0.21_src/smallsql0.21_src|;
+    loc folder_name = |file:///C:/Users/Mikev/Downloads/hsqldb-2.3.1/hsqldb-2.3.1|;
+    
+    //loc json_output_location = |file:///C:/Users/colin/Desktop/rascal/rascall_series2/clone_report_type1.json|;
+    //loc json_output_location = |file:///C:/SE_master/rascall_series2_working/smallsq_clone_report_type1.json|;
+    loc json_output_location = |file:///C:/SE_master/rascall_series2_working/hsqldb_clone_report_type1.json|;
+    //loc json_output_location = |file:///C:/SE_master/rascall_series2_working/smallsq_clone_report_type1_test.json|;
+
     list[Declaration] asts = getASTs(folder_name);
     list[list[node]] clones_type1 = find_clones_type1(asts, 5);
 
-    writeAndPrintReport(clones_type1, folder_name, jsonOutputLocation);
+    write_and_print_report(clones_type1, folder_name, json_output_location);
 
     return testArgument;
 }
