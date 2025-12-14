@@ -10,6 +10,7 @@ import Set;
 import String;
 import Map;
 import Node;
+import Type;
 
 // Definitions:
 
@@ -237,6 +238,20 @@ list[list[node]] find_clones_type1(list[Declaration] asts, int treshold) {
     return all_clones;
 }
 
+map[loc, int] get_last_line_numbers(list[Declaration] asts) {
+    map[loc, int] file_last_lines = ();
+
+    for (Declaration ast <- asts) {
+        if (ast has src) {
+            loc file_loc = ast.src;
+            int last_line = file_loc.end.line;
+            file_last_lines[file_loc] = last_line;
+        }
+    }
+
+    return file_last_lines;
+}
+
 int compute_LOC(loc location){
 	int count = 0;
 	str content = readFile(location);
@@ -245,6 +260,19 @@ int compute_LOC(loc location){
 	}
 	list[str] lines = split("\n", comment_free);
 	for( i <- lines, trim(i) != "")
+		count += 1;
+	return count;
+}
+
+// This function counts all the lines, including the white lines
+// and commetns to be able to find the last line
+int count_all_line(loc location) {
+    // starts as 1, as the function counts the new lines and that is always one less the the last line number.
+    int count = 1;
+	str content = readFile(location);
+
+    list[str] lines = split("\n", content);
+    for(i <- lines)
 		count += 1;
 	return count;
 }
@@ -261,11 +289,15 @@ void write_and_print_report(list[list[node]] clone_classes, loc project_location
 
     // map lines per file
     map[loc, int] lines_per_file = ();
+    map[str, int] lines_per_clone = ();
+    map[loc, int] last_line_file = ();
 
     for (f <- files(model.containment), isCompilationUnit(f)) {
         int lines_in_file = compute_LOC(f);
         total_lines += lines_in_file;
         lines_per_file[f] = lines_in_file;
+
+        last_line_file[f] = count_all_line(f);
     }
 
     for (clones <- clone_classes) {
@@ -275,8 +307,24 @@ void write_and_print_report(list[list[node]] clone_classes, loc project_location
             biggest_clone_in_lines = loc_per_clone;
             node biggest_clone = clones[0];
         }
+        for (node clone_node <- clones) {
+            // Get the file location for the clone
+            if (loc source_loc := clone_node.src) {
+                loc file_loc = source_loc; 
+            
+                if (file_loc.uri in lines_per_clone) {
+                     lines_per_clone[file_loc.uri] += loc_per_clone; 
+                } else {
+                     lines_per_clone[file_loc.uri] = loc_per_clone;
+                }
+            } else {
+                println("Warning: Clone node found without a source location field!");
+            }
+        }
         duplicate_lines += loc_per_clone * class_size;
     }
+
+    println(lines_per_clone);
 
     num duplicate_percentage = (duplicate_lines / total_lines) * 100.0;
 
@@ -285,7 +333,6 @@ void write_and_print_report(list[list[node]] clone_classes, loc project_location
     for (clones <- clone_classes) {
         total_clones += size(clones);
     }
-
     // calculate number of clone classes
     num total_clone_classes = size(clone_classes);
 
@@ -354,6 +401,54 @@ void write_and_print_report(list[list[node]] clone_classes, loc project_location
     }
 
     output += "\n  },";
+    output += "\n  \"lines_per_clone\": {";
+
+    hown = 0;
+    first_class = true;
+
+    for (f <- lines_per_clone) {
+        shown += 1;
+
+        if (!first_class) {
+            output += ",\n";
+        } else {
+            output += "\n";
+            first_class = false;
+        }
+        output += "    \"<f>\": <lines_per_clone[f]>";
+
+        if (shown <= 5) {
+            println("\nFile <f> has <lines_per_clone[f]> clone lines");
+        } else if (shown == 6) {
+            println("\n... (remaining clone line lengths omitted from console output)");
+        }
+    }
+
+    output += "\n  },";
+    output += "\n  \"last_line_per_file\": {";
+
+    shown = 0;
+    first_class = true;
+
+    for (f <- last_line_file) {
+        shown += 1;
+
+        if (!first_class) {
+            output += ",\n";
+        } else {
+            output += "\n";
+            first_class = false;
+        }
+        output += "    \"<f>\": <last_line_file[f]>";
+
+        if (shown <= 5) {
+            println("File <f> has <last_line_file[f]> as last line number");
+        } else if (shown == 6) {
+            println("\n... (remaining file lengths omitted from console output)");
+        }
+    }
+
+    output += "\n  },";
     output += "\n  \"lines_per_file\": {";
 
     shown = 0;
@@ -377,7 +472,6 @@ void write_and_print_report(list[list[node]] clone_classes, loc project_location
         }
     }
 
-
     // close exampleCloneClasses object and the top-level JSON object
     output += "\n  }\n";
     output += "}\n";
@@ -389,7 +483,8 @@ int main(int testArgument=0) {
     // loc folder_name = |file:///C:/Users/colin/Downloads/hsqldb-2.3.1/hsqldb-2.3.1/|;
     // loc folder_name = |file:///C:/Users/colin/Desktop/rascal/rascall_series2/test_files|;
     //loc folder_name = |file:///C:/Users/Mikev/Downloads/smallsql0.21_src/smallsql0.21_src|;
-    loc folder_name = |file:///C:/Users/Mikev/Downloads/hsqldb-2.3.1/hsqldb-2.3.1|;
+    loc folder_name = |file:///C:/Users/Mikev/Downloads/hsqldb-2.3.1/hsqldb-2.3.1/|;
+    //loc folder_name = |file:///C:/SE_master/rascall_series2_working/test_files|;
     
     //loc json_output_location = |file:///C:/Users/colin/Desktop/rascal/rascall_series2/clone_report_type1.json|;
     //loc json_output_location = |file:///C:/SE_master/rascall_series2_working/smallsq_clone_report_type1.json|;
