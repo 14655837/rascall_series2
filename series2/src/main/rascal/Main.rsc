@@ -12,92 +12,12 @@ import Map;
 import Node;
 import Type;
 
-// Definitions:
-
-// Definition Type I: exact copy, ignoring whitespace and comments.
-// int x ▷◁ int x and int x ̸ ▷◁ int y
-// Definition Type II: syntactical copy, changes allowed in variable, type, function identifiers.
-// int x ▷◁ int y
-// Definition Type III: copy with changed, added, and deleted statements.
-// print(a); print(c) ▷◁ print(a); print(b); print(c)
-// Definition Type IV: functionality is the same, code may be completely different.
-// a && b ▷◁ a ? b : false
-
 // Ast creator
 list[Declaration] getASTs(loc projectLocation) {
     M3 model = createM3FromMavenProject(projectLocation);
     list[Declaration] asts = [createAstFromFile(f, true)
         | f <- files(model.containment), isCompilationUnit(f)];
     return asts;
-}
-
-// Task 1
-
-// An AST-based clone detector whose back-end is written in Rascal that
-// detects at least Type I clones in a Java project:
-// • Detected clone classes are written to a file in a textual representation.
-// • Clone classes that are strictly included in others are dropped from
-// the results (subsumption)
-
-// Algoritm:
-// 1. Clones=∅
-// 2. For each subtree i:
-// If mass(i)>=MassThreshold
-// Then hash i to bucket
-// 3. For each subtree i and j in the same bucket
-// If CompareTree(i,j) > SimilarityThreshold
-// Then { For each subtree s of i
-//  If IsMember(Clones,s)
-//  Then RemoveClonePair(Clones,s)
-// For each subtree s of j
-//  If IsMember(Clones,s)
-//  Then RemoveClonePair(Clones,s)
-// AddClonePair(Clones,i,j)
-//  }
-
-// Similarity = 2 x S / (2 x S + L + R)
-// Where,
-// S = number of shared nodes
-// L = number of different nodes in sub-tree 1
-// R = number of different nodes in sub-tree 2
-
-// TODO rewrite this function!
-// NOT USED NOW!!
-public lrel[node,node] removeSymmetricPairs(lrel[node,node] clone_pairs) {
-    lrel[node,node] new_clone_pairs = [];
-    for (pair <- clone_pairs) {
-        tuple[node, node] reverse_pair = <pair[1], pair[0]>;
-        if (reverse_pair notin new_clone_pairs) {
-            new_clone_pairs += pair;
-        }
-    }
-    return new_clone_pairs;
-}
-
-num similarity(node ast1, node ast2) {
-    list[node] nodes_ast1 = [];
-    list[node] nodes_ast2 = [];
-
-    // find all nodes in the two asts
-    visit(ast1) {
-        case node n: {nodes_ast1 += n;}
-    }
-    visit(ast2) {
-        case node n: {nodes_ast2 += n;}
-    }
-
-    // compare the two nodes
-    list[node] overlap = nodes_ast1 & nodes_ast2;
-    list[node] only_ast1 = nodes_ast1 - nodes_ast2;
-    list[node] only_ast2 = nodes_ast2 - nodes_ast1;
-
-    num S = size(overlap);
-    num R = size(only_ast1);
-    num L = size(only_ast2);
-
-    num sim = 2.0 * S / (2.0 * S + R + L);
-
-    return sim;
 }
 
 int calc_mass(node a_node) {
@@ -120,7 +40,6 @@ node strip_location(node n) {
 bool min_line_count(loc location, int lines) {
     int totalLines = location.end.line - location.begin.line;
 	if (totalLines >= lines) {
-        // println("Location <location> has <totalLines> lines.");
 		return true;
 	}
 	return false;
@@ -136,8 +55,6 @@ bool is_inside(loc inner, loc outer) {
         && (inner.offset != outer.offset || inner.length != outer.length);
 }
 
-// "Similar" to your Java approach: treat every clone node as a candidate
-// and drop those that live *inside* another clone.
 list[list[node]] remove_child_clones_per_class(list[list[node]] clone_classes) {
     list[list[node]] result = [];
 
@@ -213,8 +130,6 @@ list[list[node]] find_clones_type1(list[Declaration] asts, int treshold) {
                     continue;
                 }
                 node n = strip_location(n_old);
-                // println("n: <n>\n\n\n");
-                // println("Processing node with src: <n_old.src>");
                 if (exact_buckets[n]?) {
                     exact_buckets[n] += [n_old];
                 } else {
@@ -226,8 +141,126 @@ list[list[node]] find_clones_type1(list[Declaration] asts, int treshold) {
             // Each exactBucket with size >= 2 is a Type I clone class
             for (k <- exact_buckets) {
                 if (size(exact_buckets[k]) >= 2) {
-                    // optionally show some structure
                     all_clones += [exact_buckets[k]];
+                }
+            }
+        }
+    }
+
+    all_clones = remove_child_clones_per_class(all_clones);
+
+    return all_clones;
+}
+
+node normalize_node_to_type2(node n) {
+    return visit(n) {
+        case \method(a,b,c,_,d,e,f) => \method(a,b,c,id("const_method_name"),d,e,f)
+        case \method(a,b,c,_,d,e)   => \method(a,b,c,id("const_method_name"),d,e)
+        case \constructor(a,_,b,c,d) => \constructor(a,id("const_ctor_name"),b,c,d)
+        case \class(a,_,b,c,d,e) => \class(a,id("const_class_name"),b,c,d,e)
+        case \interface(a,_,b,c,d,e) => \interface(a,id("const_interface_name"),b,c,d,e)
+        case \enum(a,_,b,c,d) => \enum(a,id("const_enum_name"),b,c,d)
+        case \enumConstant(a,_,b,c) => \enumConstant(a,id("const_enum_const"),b,c)
+        case \enumConstant(a,_,b) => \enumConstant(a,id("const_enum_const"),b)
+        case \variable(_,a) => \variable(id("const_var_name"),a)
+        case \variable(_,a,b) => \variable(id("const_var_name"),a,b)
+        case \parameter(a,b,_,c) => \parameter(a,b,id("const_par_name"),c)
+        case \vararg(a,b,_) => \vararg(a,b,id("const_var_arg"))
+        case \annotationType(a,_,b) => \annotationType(a,id("const_annotation_name"),b)
+        case \annotationTypeMember(a,b,_) => \annotationTypeMember(a,b,id("const_ann_member"))
+        case \annotationTypeMember(a,b,_,c) => \annotationTypeMember(a,b,id("const_ann_member"),c)
+        case \import(a,_) => \import(a,id("const_import"))
+        case \importOnDemand(a,_) => \importOnDemand(a,id("const_import"))
+        case \package(a,_) => \package(a,id("const_package"))
+        case \stringLiteral(_) => \stringLiteral("string_literal")
+		case \characterLiteral(_) => \characterLiteral("l")
+    }
+}
+
+
+
+// Type 2 is a syntactically identical copy; only variable, type, or function
+// identifiers have been changed.
+// Almost same as type 1, but when comparing changed to normalized version, and
+//  there is an extra check for if they are not inside type 1 clones.
+
+list[list[node]] find_clones_type2(list[Declaration] asts, int treshold) {
+    // Step 1: bucket by mass, like in your original version
+    map[int, list[node]] bucket = ();
+    visit(asts) {
+        case node n: {
+            int mass = calc_mass(n);
+            // puts the node in a bucket
+            if (mass >= treshold) {
+                if (mass in bucket) {
+                    list[node] current_item = bucket[mass];
+                    bucket[mass] = current_item + [n];
+                } else {
+                    bucket[mass] = [n];
+                }
+            }
+        }
+    }
+
+    list[list[node]] all_clones = [];
+    list[node] all_clones_type1 = [];
+    int done_buckets = 0;
+    int total_buckets = size(bucket);
+
+    // Step 2: for each mass-bucket, group by exact subtree
+    for (b <- bucket) {
+        done_buckets += 1;
+        if (done_buckets % 50 == 0) {
+            println("Processed <done_buckets>/<total_buckets> buckets...");
+        }
+
+        int bucketSize = size(bucket[b]);
+        if (bucketSize >= 2) {
+
+            // group by exact subtree value inside the mass bucket
+            map[node, list[node]] exact_buckets = ();
+            map[node, list[node]] exact_buckets_type1 = ();
+            for (n_old <- bucket[b]) {
+                if (!(n_old has src)) {
+                    continue;
+                }
+                if (!min_line_count(n_old.src, 6)) {
+                    continue;
+                }
+                node n = strip_location(n_old);
+                node n_normalized = normalize_node_to_type2(n);
+
+                if (exact_buckets[n_normalized]?) {
+                    exact_buckets[n_normalized] += [n_old];
+                } else {
+                    exact_buckets[n_normalized] = [n_old];
+                }
+
+                // Type 2 shouldn't be taken if its type , so type 1 has also be trackt
+                if (exact_buckets_type1[n]?) {
+                    exact_buckets_type1[n] += [n_old];
+                } else {
+                    exact_buckets_type1[n] = [n_old];
+                }
+                
+            }            
+            for (k <- exact_buckets_type1) {
+                if (size(exact_buckets_type1[k]) >= 2) {
+                    all_clones_type1 += exact_buckets_type1[k];
+                }
+            }
+            // Each exactBucket with size >= 2 is a Type I clone class
+            for (k <- exact_buckets) {
+                if ((size(exact_buckets[k]) >= 2)) {
+                    list[node] temp_list = [];
+                    for (clone <- exact_buckets[k]) {
+                        if (!(clone in all_clones_type1)) {
+                            temp_list += clone;
+                        }
+                    }
+                    if (size(temp_list) > 0) {
+                        all_clones += [temp_list];
+                    }
                 }
             }
         }
@@ -324,8 +357,6 @@ void write_and_print_report(list[list[node]] clone_classes, loc project_location
         duplicate_lines += loc_per_clone * class_size;
     }
 
-    println(lines_per_clone);
-
     num duplicate_percentage = (duplicate_lines / total_lines) * 100.0;
 
     // calculate number of clones
@@ -366,7 +397,7 @@ void write_and_print_report(list[list[node]] clone_classes, loc project_location
     for (list[node] cls <- clone_classes) {
         shown += 1;
 
-        // JSON ALWAYS gets written
+        // JSON ALWAYS gets written, terminal ouput not
         if (!first_class) {
             output += ",\n";
         } else {
@@ -472,7 +503,6 @@ void write_and_print_report(list[list[node]] clone_classes, loc project_location
         }
     }
 
-    // close exampleCloneClasses object and the top-level JSON object
     output += "\n  }\n";
     output += "}\n";
     writeFile(json_output_location, output);
@@ -482,18 +512,19 @@ int main(int testArgument=0) {
     // loc folder_name = |file:///C:/Users/colin/Downloads/smallsql0.21_src/smallsql0.21_src/|;
     // loc folder_name = |file:///C:/Users/colin/Downloads/hsqldb-2.3.1/hsqldb-2.3.1/|;
     // loc folder_name = |file:///C:/Users/colin/Desktop/rascal/rascall_series2/test_files|;
-    //loc folder_name = |file:///C:/Users/Mikev/Downloads/smallsql0.21_src/smallsql0.21_src|;
-    loc folder_name = |file:///C:/Users/Mikev/Downloads/hsqldb-2.3.1/hsqldb-2.3.1/|;
+    loc folder_name = |file:///C:/Users/Mikev/Downloads/smallsql0.21_src/smallsql0.21_src|;
+    //loc folder_name = |file:///C:/Users/Mikev/Downloads/hsqldb-2.3.1/hsqldb-2.3.1/|;
     //loc folder_name = |file:///C:/SE_master/rascall_series2_working/test_files|;
     
     //loc json_output_location = |file:///C:/Users/colin/Desktop/rascal/rascall_series2/clone_report_type1.json|;
     //loc json_output_location = |file:///C:/SE_master/rascall_series2_working/smallsq_clone_report_type1.json|;
-    loc json_output_location = |file:///C:/SE_master/rascall_series2_working/hsqldb_clone_report_type1.json|;
-    //loc json_output_location = |file:///C:/SE_master/rascall_series2_working/smallsq_clone_report_type1_test.json|;
+    //loc json_output_location = |file:///C:/SE_master/rascall_series2_working/hsqldb_clone_report_type1.json|;
+    loc json_output_location = |file:///C:/SE_master/rascall_series2_working/smallsq_clone_report_type1_test.json|;
+    //loc json_output_location = |file:///C:/SE_master/rascall_series2_working/smallsq_clone_report_type2.json|;
+    //loc json_output_location = |file:///C:/SE_master/rascall_series2_working/hsqldb_clone_report_type2.json|;
 
     list[Declaration] asts = getASTs(folder_name);
-    list[list[node]] clones_type1 = find_clones_type1(asts, 5);
-
+    list[list[node]] clones_type1 = find_clones_type2(asts, 25);
     write_and_print_report(clones_type1, folder_name, json_output_location);
 
     return testArgument;
